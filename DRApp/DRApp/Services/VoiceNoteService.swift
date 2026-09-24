@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Speech
 import os
 
 // MARK: - VoiceNoteService
@@ -28,6 +29,10 @@ final class VoiceNoteService: NSObject {
     var playbackProgress: Double = 0
     /// Raw M4A bytes of the recorded note (nil when nothing has been recorded).
     var audioData: Data?
+    /// Speech-to-text transcript of the recorded note, in the app's language (English fallback).
+    var transcript: String = ""
+    /// Whether a transcription pass is currently running.
+    var isTranscribing: Bool = false
 
     // MARK: Private
 
@@ -35,10 +40,34 @@ final class VoiceNoteService: NSObject {
     private var audioPlayer: AVAudioPlayer?
     private var recordingTimer: Timer?
     private var playbackTimer: Timer?
+    private var recognitionTask: SFSpeechRecognitionTask?
 
     private var tempURL: URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("drapp_voice_note_temp.m4a")
+    }
+    
+    init(state: RecordingState = .idle,
+         recordingDuration: TimeInterval = 0,
+         playbackProgress: Double = 0,
+         audioData: Data? = nil,
+         transcript: String = "",
+         isTranscribing: Bool = false,
+         audioRecorder: AVAudioRecorder? = nil,
+         audioPlayer: AVAudioPlayer? = nil,
+         recordingTimer: Timer? = nil,
+         playbackTimer: Timer? = nil) {
+
+        self.state = state
+        self.recordingDuration = recordingDuration
+        self.playbackProgress = playbackProgress
+        self.audioData = audioData
+        self.transcript = transcript
+        self.isTranscribing = isTranscribing
+        self.audioRecorder = audioRecorder
+        self.audioPlayer = audioPlayer
+        self.recordingTimer = recordingTimer
+        self.playbackTimer = playbackTimer
     }
 
     // MARK: - Permission + Start Recording
@@ -92,6 +121,10 @@ final class VoiceNoteService: NSObject {
             audioRecorder?.delegate = self
             audioRecorder?.record()
 
+            recognitionTask?.cancel()
+            recognitionTask = nil
+            transcript = ""
+
             state = .recording
             recordingDuration = 0
             recordingTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
@@ -118,6 +151,7 @@ final class VoiceNoteService: NSObject {
             }
             state = .recorded
             try? FileManager.default.removeItem(at: tempURL)
+            transcribe(data)
         } else {
             state = .idle
         }
@@ -167,7 +201,11 @@ final class VoiceNoteService: NSObject {
 
     func deleteRecording() {
         if state == .playing { stopPlayback() }
+        recognitionTask?.cancel()
+        recognitionTask = nil
         audioData = nil
+        transcript = ""
+        isTranscribing = false
         recordingDuration = 0
         state = .idle
     }
@@ -180,6 +218,87 @@ final class VoiceNoteService: NSObject {
             recordingDuration = p.duration
         }
         state = .recorded
+        transcribe(data)
+    }
+
+    // MARK: - Transcription
+
+    /// Transcribes the recorded audio in the app's current language, falling back to English
+    /// when that language isn't supported by on-device speech recognition.
+    private func transcribe(_ data: Data) {
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        transcript = ""
+
+        Task { [weak self] in
+            guard let self else { return }
+            let authorized = await self.requestSpeechRecognitionPermission()
+            guard authorized else { return }
+
+            let fileURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(UUID().uuidString, conformingTo: .mpeg4Audio)
+            do {
+                try data.write(to: fileURL)
+            } catch {
+                logger.error("transcribe write failed: \(error.localizedDescription)")
+                return
+            }
+            defer { try? FileManager.default.removeItem(at: fileURL) }
+
+            guard let recognizer = SFSpeechRecognizer(locale: Self.transcriptionLocale()),
+                  recognizer.isAvailable else { return }
+
+            self.isTranscribing = true
+            defer { self.isTranscribing = false }
+
+            let request = SFSpeechURLRecognitionRequest(url: fileURL)
+            request.shouldReportPartialResults = false
+
+            do {
+                self.transcript = try await self.recognize(recognizer: recognizer, request: request)
+            } catch {
+                logger.error("transcribe failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func recognize(recognizer: SFSpeechRecognizer, request: SFSpeechURLRecognitionRequest) async throws -> String {
+        try await withCheckedThrowingContinuation { continuation in
+            var didResume = false
+            recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+                if let error {
+                    guard !didResume else { return }
+                    didResume = true
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if let result, result.isFinal {
+                    guard !didResume else { return }
+                    didResume = true
+                    continuation.resume(returning: result.bestTranscription.formattedString)
+                }
+            }
+        }
+    }
+
+    private func requestSpeechRecognitionPermission() async -> Bool {
+        await withCheckedContinuation { cont in
+            SFSpeechRecognizer.requestAuthorization { status in
+                cont.resume(returning: status == .authorized)
+            }
+        }
+    }
+
+    /// The app's current language (matching the device's language settings), falling back to
+    /// English when speech recognition doesn't support it.
+    private static func transcriptionLocale() -> Locale {
+        let preferredLanguageCode = Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
+            .language.languageCode?.identifier
+        if let preferredLanguageCode,
+           let match = SFSpeechRecognizer.supportedLocales().first(where: { $0.language.languageCode?.identifier == preferredLanguageCode }) {
+            return match
+        }
+        return Locale(identifier: "en-US")
     }
 
     // MARK: - Helpers

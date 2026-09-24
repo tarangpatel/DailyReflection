@@ -14,6 +14,17 @@ struct SettingsView: View {
 
                 // Notifications
                 settingsSection("Notifications") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Set a notification that reminds you to journal everyday:")
+                            .font(AppTheme.Fonts.bodySerif)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                            .lineSpacing(4)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Layout.cornerRadius))
+                    
                     VStack(spacing: 1) {
                         Toggle(isOn: Binding(
                             get: { vm.notificationsEnabled },
@@ -52,7 +63,20 @@ struct SettingsView: View {
 
                 // Your Data
                 settingsSection("Your Data") {
+                    
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Your entries are private. We do not sell or share your data. \n\nYou can export you data to back it up and you can import it if you change your phone:")
+                            .font(AppTheme.Fonts.bodySerif)
+                            .foregroundStyle(AppTheme.Colors.textSecondary)
+                            .lineSpacing(4)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 18)
+                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Layout.cornerRadius))
+                    
                     VStack(spacing: 1) {
+                        
                         // Export
                         exportButton
 
@@ -68,19 +92,7 @@ struct SettingsView: View {
                 }
 
                 // Privacy
-                settingsSection("Privacy") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Your entries are private.\nWe do not sell or share your data.")
-                            .font(AppTheme.Fonts.bodySerif)
-                            .foregroundStyle(AppTheme.Colors.textSecondary)
-                            .lineSpacing(4)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 18)
-                    .background(AppTheme.Colors.surface)
-                    .clipShape(RoundedRectangle(cornerRadius: AppTheme.Layout.cornerRadius))
-                }
+                Link("Terms & Condition", destination: URL(string: "www.google.com")!)
             }
             .padding(.horizontal, AppTheme.Layout.horizontalPadding)
             .padding(.bottom, 40)

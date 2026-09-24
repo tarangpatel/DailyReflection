@@ -33,7 +33,34 @@ struct VoiceNoteView: View {
             case .permissionDenied:
                 permissionDeniedRow
             }
+
+            if service.state == .recorded || service.state == .playing {
+                transcriptView
+            }
         }
+    }
+
+    // MARK: - Transcript
+
+    private var transcriptView: some View {
+        Group {
+            if service.isTranscribing {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Transcribing…")
+                        .font(AppTheme.Fonts.captionSans)
+                        .foregroundStyle(AppTheme.Colors.textSecondary)
+                }
+            } else if !service.transcript.isEmpty {
+                Text(service.transcript)
+                    .font(AppTheme.Fonts.bodySerif)
+                    .foregroundStyle(AppTheme.Colors.textSecondary)
+                    .lineSpacing(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.horizontal, 2)
     }
 
     // MARK: - Permission denied
@@ -203,7 +230,7 @@ struct VoiceNoteView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
-            .background(AppTheme.Colors.surface)
+            .background(Color("BackgroundTop"))
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Layout.cornerRadius))
             .offset(x: swipeOffset)
             .gesture(
@@ -295,7 +322,7 @@ private struct RecordingWaveformView: View {
 #Preview {
     
     VStack(spacing: 24) {
-        VoiceNoteView(service: VoiceNoteService())
+        VoiceNoteView(service: VoiceNoteService(state: .recorded))
     }
     .padding()
     .appBackground()
