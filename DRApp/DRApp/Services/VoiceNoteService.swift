@@ -212,13 +212,19 @@ final class VoiceNoteService: NSObject {
 
     // MARK: - Load saved data
 
-    func loadAudioData(_ data: Data) {
+    /// - Parameter transcript: A previously-saved transcript, if any. When provided, it's used
+    ///   as-is instead of re-running speech recognition on the audio.
+    func loadAudioData(_ data: Data, transcript: String? = nil) {
         audioData = data
         if let p = try? AVAudioPlayer(data: data) {
             recordingDuration = p.duration
         }
         state = .recorded
-        transcribe(data)
+        if let transcript, !transcript.isEmpty {
+            self.transcript = transcript
+        } else {
+            transcribe(data)
+        }
     }
 
     // MARK: - Transcription

@@ -8,6 +8,7 @@ struct DailyEntryImport {
     let energyLevel: Double
     let oneWord: String
     let whatMattered: String
+    let voiceNoteTranscript: String?
 }
 
 // MARK: - CSVService
@@ -29,16 +30,17 @@ actor CSVService {
     func exportEntries(_ entries: [DailyEntry]) async throws -> URL {
         let fileURL = documentsURL.appendingPathComponent(csvFileName)
 
-        var lines: [String] = ["date,moodScore,energyLevel,oneWord,whatMattered"]
+        var lines: [String] = ["date,moodScore,energyLevel,oneWord,whatMattered,voiceNoteTranscript"]
         let formatter = ISO8601DateFormatter()
 
         for entry in entries.sorted(by: { $0.date < $1.date }) {
-            let dateStr     = formatter.string(from: entry.date)
-            let moodStr     = String(format: "%.4f", entry.moodScore)
-            let energyStr   = String(format: "%.4f", entry.energyLevel)
-            let wordStr     = csvEscape(entry.oneWord)
-            let matteredStr = csvEscape(entry.whatMattered)
-            lines.append("\(dateStr),\(moodStr),\(energyStr),\(wordStr),\(matteredStr)")
+            let dateStr       = formatter.string(from: entry.date)
+            let moodStr       = String(format: "%.4f", entry.moodScore)
+            let energyStr     = String(format: "%.4f", entry.energyLevel)
+            let wordStr       = csvEscape(entry.oneWord)
+            let matteredStr   = csvEscape(entry.whatMattered)
+            let transcriptStr = csvEscape(entry.voiceNoteTranscript ?? "")
+            lines.append("\(dateStr),\(moodStr),\(energyStr),\(wordStr),\(matteredStr),\(transcriptStr)")
         }
 
         let csvContent = lines.joined(separator: "\n")
@@ -85,12 +87,15 @@ actor CSVService {
                 let energyLevel = Double(columns[2])
             else { continue }
 
+            let transcript = columns.count >= 6 ? columns[5] : ""
+
             results.append(DailyEntryImport(
                 date: date,
                 moodScore: max(0, min(1, moodScore)),
                 energyLevel: max(0, min(1, energyLevel)),
                 oneWord: columns[3],
-                whatMattered: columns[4]
+                whatMattered: columns[4],
+                voiceNoteTranscript: transcript.isEmpty ? nil : transcript
             ))
         }
 

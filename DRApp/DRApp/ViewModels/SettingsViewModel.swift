@@ -59,7 +59,8 @@ final class SettingsViewModel {
                     moodScore: record.moodScore,
                     energyLevel: record.energyLevel,
                     oneWord: record.oneWord,
-                    whatMattered: record.whatMattered
+                    whatMattered: record.whatMattered,
+                    voiceNoteTranscript: record.voiceNoteTranscript
                 )
                 context.insert(entry)
                 insertedCount += 1

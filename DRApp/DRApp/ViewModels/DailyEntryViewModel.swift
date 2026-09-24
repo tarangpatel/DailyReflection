@@ -38,7 +38,7 @@ final class DailyEntryViewModel {
             oneWord      = existing.oneWord
             whatMattered = existing.whatMattered
             if let data = existing.voiceNoteData {
-                voiceNoteService.loadAudioData(data)
+                voiceNoteService.loadAudioData(data, transcript: existing.voiceNoteTranscript)
             }
         }
     }
@@ -51,6 +51,7 @@ final class DailyEntryViewModel {
         defer { isSaving = false }
 
         let noteData = voiceNoteService.audioData
+        let noteTranscript = noteData == nil ? nil : voiceNoteService.transcript
 
         if let existing = existingEntry {
             existing.moodScore    = moodScore
@@ -58,6 +59,7 @@ final class DailyEntryViewModel {
             existing.oneWord      = oneWord
             existing.whatMattered = whatMattered
             existing.voiceNoteData = noteData
+            existing.voiceNoteTranscript = noteTranscript
         } else {
             let entry = DailyEntry(
                 date: Date(),
@@ -65,7 +67,8 @@ final class DailyEntryViewModel {
                 energyLevel: energyLevel,
                 oneWord: oneWord,
                 whatMattered: whatMattered,
-                voiceNoteData: noteData
+                voiceNoteData: noteData,
+                voiceNoteTranscript: noteTranscript
             )
             context.insert(entry)
         }

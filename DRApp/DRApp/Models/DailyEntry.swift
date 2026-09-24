@@ -14,6 +14,8 @@ final class DailyEntry {
     var whatMattered: String
     /// Encoded M4A audio data for the optional voice note.
     var voiceNoteData: Data?
+    /// Speech-to-text transcript of the voice note, if one was recorded.
+    var voiceNoteTranscript: String?
     var createdAt: Date
 
     init(
@@ -24,6 +26,7 @@ final class DailyEntry {
         oneWord: String = "",
         whatMattered: String = "",
         voiceNoteData: Data? = nil,
+        voiceNoteTranscript: String? = nil,
         createdAt: Date = Date()
     ) {
         self.id = id
@@ -33,6 +36,7 @@ final class DailyEntry {
         self.oneWord = oneWord
         self.whatMattered = whatMattered
         self.voiceNoteData = voiceNoteData
+        self.voiceNoteTranscript = voiceNoteTranscript
         self.createdAt = createdAt
     }
 }
