@@ -22,6 +22,7 @@ final class OnboardingViewModel {
     var whyHereText: String = ""
     var selectedEmotionalStyle: EmotionalStyle? = nil
     var selectedTone: TonePreference? = nil
+    var errorMessage: String? = nil
 
     var canContinueWhyHere: Bool { !whyHereText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     var canContinueEmotionalStyle: Bool { selectedEmotionalStyle != nil }
@@ -54,7 +55,10 @@ final class OnboardingViewModel {
             tonePreference: selectedTone?.rawValue ?? ""
         )
         context.insert(profile)
-        try? context.save()
-        appViewModel.completeOnboarding()
+        if context.saveLogging("completeOnboarding") {
+            appViewModel.completeOnboarding()
+        } else {
+            errorMessage = "Something went wrong saving your answers. Please try again."
+        }
     }
 }

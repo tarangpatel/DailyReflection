@@ -47,6 +47,14 @@ struct OnboardingContainerView: View {
             }
         }
         .animation(AppTheme.Animation.slowFade, value: vm.step)
+        .alert("Something went wrong", isPresented: Binding(
+            get: { vm.errorMessage != nil },
+            set: { if !$0 { vm.errorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(vm.errorMessage ?? "")
+        }
     }
 }
 

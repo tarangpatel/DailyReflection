@@ -1,5 +1,6 @@
 import SwiftUI
 import AVFoundation
+import os
 
 // MARK: - VoiceNoteView
 
@@ -32,6 +33,8 @@ struct VoiceNoteView: View {
                 playbackRow
             case .permissionDenied:
                 permissionDeniedRow
+            case .failed(let failure):
+                failedRow(failure)
             }
 
             if service.state == .recorded || service.state == .playing {
@@ -75,7 +78,11 @@ struct VoiceNoteView: View {
                     .foregroundStyle(AppTheme.Colors.textPrimary)
                 Button("Open Settings") {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
+                        UIApplication.shared.open(url) { success in
+                            if !success {
+                                AppLog.voiceNote.error("permissionDeniedRow: failed to open Settings URL")
+                            }
+                        }
                     }
                 }
                 .font(AppTheme.Fonts.captionSans)
@@ -83,6 +90,47 @@ struct VoiceNoteView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    // MARK: - Failed
+
+    private func failedMessage(_ failure: VoiceNoteService.RecordingState.Failure) -> String {
+        switch failure {
+        case .recorderUnavailable: return "Couldn't start recording"
+        case .recordingLost:       return "That recording couldn't be saved"
+        case .playbackFailed:      return "Couldn't play this recording"
+        }
+    }
+
+    private func failedRow(_ failure: VoiceNoteService.RecordingState.Failure) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.red.opacity(0.12))
+                    .frame(width: 52, height: 52)
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.red)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(failedMessage(failure))
+                    .font(AppTheme.Fonts.labelSans)
+                    .foregroundStyle(AppTheme.Colors.textPrimary)
+                Button("Try again") {
+                    service.retry()
+                }
+                .font(AppTheme.Fonts.captionSans)
+                .foregroundStyle(AppTheme.Colors.accent)
+            }
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(failedMessage(failure))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            service.retry()
+        }
     }
 
     // MARK: - Idle: hold-to-record button

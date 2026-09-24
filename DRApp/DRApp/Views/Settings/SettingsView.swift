@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import os
 internal import UniformTypeIdentifiers
 
 struct SettingsView: View {
@@ -47,7 +48,7 @@ struct SettingsView: View {
                                 "Remind me at",
                                 selection: Binding(
                                     get: { vm.reminderTime },
-                                    set: { vm.updateReminderTime($0) }
+                                    set: { newValue in Task { await vm.updateReminderTime(newValue) } }
                                 ),
                                 displayedComponents: .hourAndMinute
                             )
@@ -92,7 +93,7 @@ struct SettingsView: View {
                 }
 
                 // Privacy
-                Link("Terms & Condition", destination: URL(string: "www.google.com")!)
+                termsLink
             }
             .padding(.horizontal, AppTheme.Layout.horizontalPadding)
             .padding(.bottom, 40)
@@ -117,7 +118,7 @@ struct SettingsView: View {
         .alert("Import complete", isPresented: $vm.showImportSuccess) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("\(vm.importSuccessCount) \(vm.importSuccessCount == 1 ? "entry" : "entries") added.")
+            Text(importSummaryMessage)
         }
         .alert("Something went wrong", isPresented: Binding(
             get: { vm.errorMessage != nil },
@@ -130,12 +131,38 @@ struct SettingsView: View {
         .alert("Notifications are off", isPresented: $vm.showPermissionDeniedAlert) {
             Button("Open Settings") {
                 if let url = URL(string: UIApplication.openSettingsURLString) {
-                    UIApplication.shared.open(url)
+                    UIApplication.shared.open(url) { success in
+                        if !success {
+                            AppLog.app.error("SettingsView: failed to open Settings URL")
+                        }
+                    }
                 }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Enable notifications for Daily Reflection in Settings to turn on your daily reminder.")
+        }
+    }
+
+    // MARK: Import summary
+
+    private var importSummaryMessage: String {
+        let addedPart = "\(vm.importSuccessCount) \(vm.importSuccessCount == 1 ? "entry" : "entries") added."
+        guard vm.importSkippedCount > 0 else { return addedPart }
+        return addedPart + " \(vm.importSkippedCount) \(vm.importSkippedCount == 1 ? "row" : "rows") skipped."
+    }
+
+    // MARK: Terms link
+
+    @ViewBuilder
+    private var termsLink: some View {
+        if let url = URL(string: "www.google.com") {
+            Link("Terms & Condition", destination: url)
+        } else {
+            EmptyView()
+                .onAppear {
+                    AppLog.app.error("SettingsView: Terms & Conditions URL failed to construct")
+                }
         }
     }
 

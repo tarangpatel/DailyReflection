@@ -9,8 +9,6 @@ import SwiftUI
 import SwiftData
 import os
 
-private let logger = Logger(subsystem: "com.tarangp.DRApp", category: "DRAppApp")
-
 @main
 struct DRAppApp: App {
     @State private var appViewModel = AppViewModel()
@@ -21,33 +19,35 @@ struct DRAppApp: App {
         UserProfile.self
     ])
 
-    let sharedModelContainer: ModelContainer
-    /// True when the persistent store couldn't be opened and we fell back to an in-memory store.
-    let dataStoreUnavailable: Bool
+    /// nil when neither the persistent nor the in-memory fallback store could be opened.
+    let sharedModelContainer: ModelContainer?
 
     init() {
         let persistentConfig = ModelConfiguration(schema: Self.schema, isStoredInMemoryOnly: false)
-        if let container = try? ModelContainer(for: Self.schema, configurations: [persistentConfig]) {
-            sharedModelContainer = container
-            dataStoreUnavailable = false
-        } else {
-            logger.error("Persistent ModelContainer failed to load — falling back to an in-memory store.")
+        do {
+            sharedModelContainer = try ModelContainer(for: Self.schema, configurations: [persistentConfig])
+        } catch {
+            AppLog.app.error("Persistent ModelContainer failed to load: \(String(describing: error), privacy: .public) — falling back to an in-memory store.")
             let fallbackConfig = ModelConfiguration(schema: Self.schema, isStoredInMemoryOnly: true)
-            sharedModelContainer = try! ModelContainer(for: Self.schema, configurations: [fallbackConfig])
-            dataStoreUnavailable = true
+            do {
+                sharedModelContainer = try ModelContainer(for: Self.schema, configurations: [fallbackConfig])
+            } catch {
+                AppLog.app.fault("In-memory fallback ModelContainer also failed to load: \(String(describing: error), privacy: .public)")
+                sharedModelContainer = nil
+            }
         }
     }
 
     var body: some Scene {
         WindowGroup {
-            if dataStoreUnavailable {
-                DataUnavailableView()
-            } else {
+            if let sharedModelContainer {
                 AppView()
                     .environment(appViewModel)
+                    .modelContainer(sharedModelContainer)
+            } else {
+                DataUnavailableView()
             }
         }
-        .modelContainer(sharedModelContainer)
     }
 }
 

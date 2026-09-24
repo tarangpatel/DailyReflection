@@ -129,6 +129,14 @@ struct DailyEntryView: View {
         .onAppear {
             vm.loadTodayEntry(from: entries)
         }
+        .alert("Something went wrong", isPresented: Binding(
+            get: { vm.saveErrorMessage != nil },
+            set: { if !$0 { vm.saveErrorMessage = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(vm.saveErrorMessage ?? "")
+        }
     }
 
     private func saveAndDismiss() async {

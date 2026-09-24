@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import os
 
 @Observable
 @MainActor
@@ -26,7 +27,10 @@ final class WeeklyMirrorViewModel {
         }
 
         // Filter entries belonging to this week
-        let weekEnd = Calendar.current.date(byAdding: .day, value: 7, to: weekStartDay)!
+        guard let weekEnd = Calendar.current.date(byAdding: .day, value: 7, to: weekStartDay) else {
+            AppLog.app.error("loadOrGenerate: couldn't compute week end for \(weekStartDay, privacy: .public)")
+            return
+        }
         let weekEntries = allEntries.filter {
             $0.date >= weekStartDay && $0.date < weekEnd
         }
@@ -51,7 +55,7 @@ final class WeeklyMirrorViewModel {
             averageEnergy: avgEnergy
         )
         context.insert(newReflection)
-        try? context.save()
+        context.saveLogging("loadOrGenerate")
         reflection = newReflection
     }
 
@@ -59,6 +63,6 @@ final class WeeklyMirrorViewModel {
 
     func submitFeedback(_ rating: String, context: ModelContext) async {
         reflection?.accuracyRating = rating
-        try? context.save()
+        context.saveLogging("submitFeedback")
     }
 }

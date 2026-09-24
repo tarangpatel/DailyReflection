@@ -5,8 +5,6 @@ import os
 
 // MARK: - VoiceNoteService
 
-private let logger = Logger(subsystem: "com.tarangp.DRApp", category: "VoiceNoteService")
-
 /// Manages audio recording and playback for the optional daily voice note.
 /// Press-and-hold to record; release to save. Swipe-to-delete handled in the view layer.
 @Observable
@@ -20,6 +18,16 @@ final class VoiceNoteService: NSObject {
         case recorded
         case playing
         case permissionDenied
+        case failed(Failure)
+
+        enum Failure: Equatable {
+            /// The recorder itself couldn't be created or started (session/hardware error).
+            case recorderUnavailable
+            /// A recording finished but its audio data couldn't be recovered afterward.
+            case recordingLost
+            /// A previously-recorded note couldn't be played back.
+            case playbackFailed
+        }
     }
 
     var state: RecordingState = .idle
@@ -75,6 +83,7 @@ final class VoiceNoteService: NSObject {
     func requestPermissionAndStart() async {
         let granted = await requestMicrophonePermission()
         guard granted else {
+            AppLog.voiceNote.warning("requestPermissionAndStart: microphone permission denied")
             state = .permissionDenied
             return
         }
@@ -117,9 +126,14 @@ final class VoiceNoteService: NSObject {
                 AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
             ]
 
-            audioRecorder = try AVAudioRecorder(url: tempURL, settings: settings)
-            audioRecorder?.delegate = self
-            audioRecorder?.record()
+            let recorder = try AVAudioRecorder(url: tempURL, settings: settings)
+            recorder.delegate = self
+            guard recorder.record() else {
+                AppLog.voiceNote.error("startRecording: AVAudioRecorder.record() returned false")
+                state = .failed(.recorderUnavailable)
+                return
+            }
+            audioRecorder = recorder
 
             recognitionTask?.cancel()
             recognitionTask = nil
@@ -131,7 +145,8 @@ final class VoiceNoteService: NSObject {
                 self?.recordingDuration += 0.05
             }
         } catch {
-            logger.error("startRecording failed: \(error.localizedDescription)")
+            AppLog.voiceNote.error("startRecording failed: \(String(describing: error), privacy: .public)")
+            state = .failed(.recorderUnavailable)
         }
     }
 
@@ -144,20 +159,32 @@ final class VoiceNoteService: NSObject {
         audioRecorder?.stop()
         audioRecorder = nil
 
-        if let data = try? Data(contentsOf: tempURL) {
+        do {
+            let data = try Data(contentsOf: tempURL)
             audioData = data
             if let p = try? AVAudioPlayer(data: data) {
                 recordingDuration = p.duration
+            } else {
+                AppLog.voiceNote.warning("stopRecording: recorded data isn't a playable AVAudioPlayer; keeping timer-derived duration")
             }
             state = .recorded
-            try? FileManager.default.removeItem(at: tempURL)
+            do {
+                try FileManager.default.removeItem(at: tempURL)
+            } catch {
+                AppLog.voiceNote.warning("stopRecording: failed to remove temp file: \(String(describing: error), privacy: .public)")
+            }
             transcribe(data)
-        } else {
-            state = .idle
+        } catch {
+            AppLog.voiceNote.error("stopRecording: recorded data couldn't be read back: \(String(describing: error), privacy: .public)")
+            state = .failed(.recordingLost)
         }
 
 #if os(iOS) || os(visionOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            AppLog.voiceNote.warning("stopRecording: setActive(false) failed: \(String(describing: error), privacy: .public)")
+        }
 #endif
     }
 
@@ -170,18 +197,24 @@ final class VoiceNoteService: NSObject {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default)
             try AVAudioSession.sharedInstance().setActive(true)
 #endif
-            audioPlayer = try AVAudioPlayer(data: data)
-            audioPlayer?.delegate = self
-            audioPlayer?.play()
+            let player = try AVAudioPlayer(data: data)
+            player.delegate = self
+            guard player.play() else {
+                AppLog.voiceNote.error("play: AVAudioPlayer.play() returned false")
+                state = .failed(.playbackFailed)
+                return
+            }
+            audioPlayer = player
             state = .playing
             playbackProgress = 0
-            let dur = audioPlayer?.duration ?? 0
+            let dur = player.duration
             playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
                 guard let self, let p = self.audioPlayer else { return }
                 self.playbackProgress = dur > 0 ? p.currentTime / dur : 0
             }
         } catch {
-            logger.error("play failed: \(error.localizedDescription)")
+            AppLog.voiceNote.error("play failed: \(String(describing: error), privacy: .public)")
+            state = .failed(.playbackFailed)
         }
     }
 
@@ -193,7 +226,11 @@ final class VoiceNoteService: NSObject {
         playbackProgress = 0
         state = .recorded
 #if os(iOS) || os(visionOS)
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            AppLog.voiceNote.warning("stopPlayback: setActive(false) failed: \(String(describing: error), privacy: .public)")
+        }
 #endif
     }
 
@@ -210,15 +247,24 @@ final class VoiceNoteService: NSObject {
         state = .idle
     }
 
+    /// Resets a `.failed` state back to `.idle` so the user can try again.
+    func retry() {
+        guard case .failed = state else { return }
+        state = .idle
+    }
+
     // MARK: - Load saved data
 
     /// - Parameter transcript: A previously-saved transcript, if any. When provided, it's used
     ///   as-is instead of re-running speech recognition on the audio.
     func loadAudioData(_ data: Data, transcript: String? = nil) {
         audioData = data
-        if let p = try? AVAudioPlayer(data: data) {
-            recordingDuration = p.duration
+        guard let p = try? AVAudioPlayer(data: data) else {
+            AppLog.voiceNote.error("loadAudioData: stored audio data isn't a playable recording")
+            state = .failed(.recordingLost)
+            return
         }
+        recordingDuration = p.duration
         state = .recorded
         if let transcript, !transcript.isEmpty {
             self.transcript = transcript
@@ -228,6 +274,10 @@ final class VoiceNoteService: NSObject {
     }
 
     // MARK: - Transcription
+
+    private enum TranscriptionError: Error {
+        case timedOut
+    }
 
     /// Transcribes the recorded audio in the app's current language, falling back to English
     /// when that language isn't supported by on-device speech recognition.
@@ -239,20 +289,35 @@ final class VoiceNoteService: NSObject {
         Task { [weak self] in
             guard let self else { return }
             let authorized = await self.requestSpeechRecognitionPermission()
-            guard authorized else { return }
+            guard authorized else {
+                AppLog.transcription.warning("transcribe: speech recognition permission not granted")
+                return
+            }
 
             let fileURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(UUID().uuidString, conformingTo: .mpeg4Audio)
             do {
                 try data.write(to: fileURL)
             } catch {
-                logger.error("transcribe write failed: \(error.localizedDescription)")
+                AppLog.transcription.error("transcribe: write failed: \(String(describing: error), privacy: .public)")
                 return
             }
-            defer { try? FileManager.default.removeItem(at: fileURL) }
+            defer {
+                do {
+                    try FileManager.default.removeItem(at: fileURL)
+                } catch {
+                    AppLog.transcription.warning("transcribe: temp file cleanup failed: \(String(describing: error), privacy: .public)")
+                }
+            }
 
-            guard let recognizer = SFSpeechRecognizer(locale: Self.transcriptionLocale()),
-                  recognizer.isAvailable else { return }
+            guard let recognizer = SFSpeechRecognizer(locale: Self.transcriptionLocale()) else {
+                AppLog.transcription.warning("transcribe: no recognizer available for locale \(Self.transcriptionLocale().identifier, privacy: .public)")
+                return
+            }
+            guard recognizer.isAvailable else {
+                AppLog.transcription.warning("transcribe: recognizer unavailable for locale \(Self.transcriptionLocale().identifier, privacy: .public)")
+                return
+            }
 
             self.isTranscribing = true
             defer { self.isTranscribing = false }
@@ -263,15 +328,18 @@ final class VoiceNoteService: NSObject {
             do {
                 self.transcript = try await self.recognize(recognizer: recognizer, request: request)
             } catch {
-                logger.error("transcribe failed: \(error.localizedDescription)")
+                AppLog.transcription.error("transcribe failed: \(String(describing: error), privacy: .public)")
             }
         }
     }
 
+    /// Races speech recognition against a timeout so a hung or silently-dropped
+    /// recognition callback can never leave `isTranscribing` stuck `true` forever.
     private func recognize(recognizer: SFSpeechRecognizer, request: SFSpeechURLRecognitionRequest) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             var didResume = false
-            recognitionTask = recognizer.recognitionTask(with: request) { result, error in
+
+            let task = recognizer.recognitionTask(with: request) { result, error in
                 if let error {
                     guard !didResume else { return }
                     didResume = true
@@ -283,6 +351,17 @@ final class VoiceNoteService: NSObject {
                     didResume = true
                     continuation.resume(returning: result.bestTranscription.formattedString)
                 }
+            }
+            recognitionTask = task
+
+            Task { [weak self] in
+                try? await Task.sleep(for: .seconds(30))
+                guard !didResume else { return }
+                didResume = true
+                AppLog.transcription.warning("recognize: timed out after 30s")
+                task.cancel()
+                self?.recognitionTask = nil
+                continuation.resume(throwing: TranscriptionError.timedOut)
             }
         }
     }
@@ -318,7 +397,11 @@ final class VoiceNoteService: NSObject {
 // MARK: - AVAudioRecorderDelegate
 
 extension VoiceNoteService: AVAudioRecorderDelegate {
-    nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {}
+    nonisolated func audioRecorderDidFinishRecording(_ recorder: AVAudioRecorder, successfully flag: Bool) {
+        if !flag {
+            AppLog.voiceNote.error("audioRecorderDidFinishRecording: finished unsuccessfully")
+        }
+    }
 }
 
 // MARK: - AVAudioPlayerDelegate
@@ -326,6 +409,9 @@ extension VoiceNoteService: AVAudioRecorderDelegate {
 extension VoiceNoteService: AVAudioPlayerDelegate {
     nonisolated func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         Task { @MainActor in
+            if !flag {
+                AppLog.voiceNote.warning("audioPlayerDidFinishPlaying: finished unsuccessfully")
+            }
             self.playbackTimer?.invalidate()
             self.playbackTimer = nil
             self.playbackProgress = 0

@@ -16,6 +16,7 @@ final class DailyEntryViewModel {
 
     var isSaving: Bool = false
     var didSave: Bool = false
+    var saveErrorMessage: String? = nil
 
     /// If an entry already exists for today, this holds it (edit mode).
     var existingEntry: DailyEntry? = nil
@@ -73,7 +74,10 @@ final class DailyEntryViewModel {
             context.insert(entry)
         }
 
-        try? context.save()
-        didSave = true
+        if context.saveLogging("saveEntry") {
+            didSave = true
+        } else {
+            saveErrorMessage = "Your entry couldn't be saved. Your text is still here — try again."
+        }
     }
 }

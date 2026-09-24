@@ -1,5 +1,6 @@
 import Foundation
 import FoundationModels
+import os
 
 // MARK: - Week Tone Classification
 
@@ -9,6 +10,26 @@ private enum WeekTone {
     case uneven          // large variance in mood or energy
     case heavy           // avg mood < 0.40
     case neutral         // everything else
+}
+
+// MARK: - Timeout helper
+
+private enum NarrativeError: Error {
+    case timedOut
+}
+
+/// Races `operation` against a timeout so a hung on-device model call can never
+/// leave `WeeklyMirrorViewModel.isGenerating` spinning forever.
+private func withTimeout<T: Sendable>(seconds: Double, operation: @escaping @Sendable () async throws -> T) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask { try await operation() }
+        group.addTask {
+            try await Task.sleep(for: .seconds(seconds))
+            throw NarrativeError.timedOut
+        }
+        defer { group.cancelAll() }
+        return try await group.next()!
+    }
 }
 
 // MARK: - ReflectionNarrativeService
@@ -28,6 +49,7 @@ actor ReflectionNarrativeService {
     /// - Returns: A narrative string suitable for display in the Weekly Mirror.
     func generateNarrative(for entries: [DailyEntry], weekStartDate: Date) async -> String {
         guard !entries.isEmpty else {
+            AppLog.narrative.debug("generateNarrative: no entries for this week — returning quiet-week copy")
             return "This week was quiet — no entries were recorded. Sometimes silence is its own kind of reflection."
         }
 
@@ -39,7 +61,8 @@ actor ReflectionNarrativeService {
         let weekLabel = weekRangeLabel(from: weekStartDate)
 
         // Attempt on-device Apple Foundation Model generation
-        if case .available = SystemLanguageModel.default.availability {
+        switch SystemLanguageModel.default.availability {
+        case .available:
             if let aiNarrative = await generateWithFoundationModel(
                 entries: sorted,
                 weekLabel: weekLabel,
@@ -49,6 +72,8 @@ actor ReflectionNarrativeService {
             ) {
                 return aiNarrative
             }
+        case .unavailable(let reason):
+            AppLog.narrative.info("generateNarrative: on-device model unavailable (\(String(describing: reason), privacy: .public)) — using template narrative")
         }
 
         // Fallback: template-based narrative
@@ -83,12 +108,30 @@ actor ReflectionNarrativeService {
 
         do {
             let session = LanguageModelSession()
-            let response = try await session.respond(to: prompt)
-            let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            return text.isEmpty ? nil : text
+            let text = try await withTimeout(seconds: 20) {
+                let response = try await session.respond(to: prompt)
+                return response.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            guard !text.isEmpty else {
+                AppLog.narrative.warning("generateWithFoundationModel: model returned an empty response")
+                return nil
+            }
+            return text
         } catch {
-            // Model error — fall through to template
+            logGenerationFailure(error)
             return nil
+        }
+    }
+
+    private func logGenerationFailure(_ error: Error) {
+        if error is NarrativeError {
+            AppLog.narrative.warning("generateWithFoundationModel: timed out waiting for the on-device model")
+        } else if error is LanguageModelSession.GenerationError {
+            AppLog.narrative.warning("generateWithFoundationModel: generation error: \(String(describing: error), privacy: .public)")
+        } else if error is CancellationError {
+            AppLog.narrative.warning("generateWithFoundationModel: cancelled")
+        } else {
+            AppLog.narrative.error("generateWithFoundationModel: \(String(describing: error), privacy: .public)")
         }
     }
 
