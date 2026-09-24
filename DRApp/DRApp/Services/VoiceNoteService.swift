@@ -1,7 +1,10 @@
 import Foundation
 import AVFoundation
+import os
 
 // MARK: - VoiceNoteService
+
+private let logger = Logger(subsystem: "com.tarangp.DRApp", category: "VoiceNoteService")
 
 /// Manages audio recording and playback for the optional daily voice note.
 /// Press-and-hold to record; release to save. Swipe-to-delete handled in the view layer.
@@ -15,6 +18,7 @@ final class VoiceNoteService: NSObject {
         case recording
         case recorded
         case playing
+        case permissionDenied
     }
 
     var state: RecordingState = .idle
@@ -41,7 +45,10 @@ final class VoiceNoteService: NSObject {
 
     func requestPermissionAndStart() async {
         let granted = await requestMicrophonePermission()
-        guard granted else { return }
+        guard granted else {
+            state = .permissionDenied
+            return
+        }
         startRecording()
     }
 
@@ -91,7 +98,7 @@ final class VoiceNoteService: NSObject {
                 self?.recordingDuration += 0.05
             }
         } catch {
-            print("[VoiceNoteService] startRecording error: \(error)")
+            logger.error("startRecording failed: \(error.localizedDescription)")
         }
     }
 
@@ -110,6 +117,7 @@ final class VoiceNoteService: NSObject {
                 recordingDuration = p.duration
             }
             state = .recorded
+            try? FileManager.default.removeItem(at: tempURL)
         } else {
             state = .idle
         }
@@ -139,7 +147,7 @@ final class VoiceNoteService: NSObject {
                 self.playbackProgress = dur > 0 ? p.currentTime / dur : 0
             }
         } catch {
-            print("[VoiceNoteService] play error: \(error)")
+            logger.error("play failed: \(error.localizedDescription)")
         }
     }
 

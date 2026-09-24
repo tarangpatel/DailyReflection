@@ -25,6 +25,8 @@ struct LabeledSliderView: View {
                 Slider(value: $value, in: 0...1)
                     .tint(.clear)
                     .frame(height: 6)
+                    .accessibilityLabel(label)
+                    .accessibilityValue("\(Int(value * 100)) percent")
             }
 
             HStack {

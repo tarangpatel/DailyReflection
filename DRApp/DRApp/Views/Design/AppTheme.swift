@@ -46,23 +46,39 @@ enum AppTheme {
 
     // MARK: Fonts
 
+    /// All fonts are text-style-based so they scale with the user's preferred Dynamic Type size.
     enum Fonts {
-        /// Serif font for narrative / reflection text.
+        /// Serif font for narrative / reflection text, scaled relative to the nearest matching text style.
         static func reflectionSerif(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-            .system(size: size, weight: weight, design: .serif)
+            .system(textStyle(for: size), design: .serif, weight: weight)
         }
 
-        /// Sans-serif font for UI chrome.
+        /// Sans-serif font for UI chrome, scaled relative to the nearest matching text style.
         static func uiSans(_ size: CGFloat, weight: Font.Weight = .regular) -> Font {
-            .system(size: size, weight: weight, design: .default)
+            .system(textStyle(for: size), design: .default, weight: weight)
         }
 
-        static let titleSerif: Font    = .system(size: 32, weight: .light, design: .serif)
-        static let headingSerif: Font  = .system(size: 22, weight: .regular, design: .serif)
-        static let bodySerif: Font     = .system(size: 17, weight: .regular, design: .serif)
-        static let captionSans: Font   = .system(size: 13, weight: .regular, design: .default)
-        static let labelSans: Font     = .system(size: 15, weight: .regular, design: .default)
-        static let buttonSans: Font    = .system(size: 16, weight: .medium, design: .default)
+        static let titleSerif: Font    = .system(.largeTitle, design: .serif, weight: .light)
+        static let headingSerif: Font  = .system(.title2, design: .serif)
+        static let bodySerif: Font     = .system(.body, design: .serif)
+        static let captionSans: Font   = .system(.footnote, design: .default)
+        static let labelSans: Font     = .system(.subheadline, design: .default)
+        static let buttonSans: Font    = .system(.callout, design: .default, weight: .medium)
+
+        private static func textStyle(for size: CGFloat) -> Font.TextStyle {
+            switch size {
+            case 32...:   return .largeTitle
+            case 28..<32: return .title
+            case 22..<28: return .title2
+            case 20..<22: return .title3
+            case 17..<20: return .body
+            case 16..<17: return .callout
+            case 15..<16: return .subheadline
+            case 13..<15: return .footnote
+            case 11..<13: return .caption
+            default:      return .caption2
+            }
+        }
     }
 
     // MARK: Animation

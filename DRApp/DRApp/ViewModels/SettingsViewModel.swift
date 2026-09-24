@@ -6,13 +6,14 @@ import UserNotifications
 @MainActor
 final class SettingsViewModel {
 
-    var notificationsEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "notificationsEnabled") }
-        set {
-            UserDefaults.standard.set(newValue, forKey: "notificationsEnabled")
-            if newValue { requestNotificationPermission() }
-        }
-    }
+    private static let reminderIdentifier = "dailyReflectionReminder"
+    private static let enabledKey = "notificationsEnabled"
+    private static let reminderHourKey = "reminderHour"
+    private static let reminderMinuteKey = "reminderMinute"
+
+    var notificationsEnabled: Bool = UserDefaults.standard.bool(forKey: SettingsViewModel.enabledKey)
+    var reminderTime: Date = SettingsViewModel.loadReminderTime()
+    var showPermissionDeniedAlert: Bool = false
 
     var exportURL: URL? = nil
     var isExporting: Bool = false
@@ -74,10 +75,82 @@ final class SettingsViewModel {
 
     // MARK: Notifications
 
-    private func requestNotificationPermission() {
-        Task {
-            _ = try? await UNUserNotificationCenter.current()
-                .requestAuthorization(options: [.alert, .sound])
+    /// Toggles the daily reminder. Requests authorization on enable; if denied,
+    /// reverts the toggle and surfaces an alert pointing to Settings.
+    func setNotificationsEnabled(_ enabled: Bool) async {
+        guard enabled else {
+            notificationsEnabled = false
+            UserDefaults.standard.set(false, forKey: Self.enabledKey)
+            cancelReminder()
+            return
         }
+
+        let granted = await requestNotificationPermission()
+        guard granted else {
+            notificationsEnabled = false
+            UserDefaults.standard.set(false, forKey: Self.enabledKey)
+            showPermissionDeniedAlert = true
+            return
+        }
+
+        notificationsEnabled = true
+        UserDefaults.standard.set(true, forKey: Self.enabledKey)
+        scheduleReminder()
+    }
+
+    func updateReminderTime(_ date: Date) {
+        reminderTime = date
+        let calendar = Calendar.current
+        UserDefaults.standard.set(calendar.component(.hour, from: date), forKey: Self.reminderHourKey)
+        UserDefaults.standard.set(calendar.component(.minute, from: date), forKey: Self.reminderMinuteKey)
+        if notificationsEnabled {
+            scheduleReminder()
+        }
+    }
+
+    private func requestNotificationPermission() async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional:
+            return true
+        case .denied:
+            return false
+        default:
+            return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        }
+    }
+
+    private func scheduleReminder() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.reminderIdentifier])
+
+        let content = UNMutableNotificationContent()
+        content.title = "Daily Reflection"
+        content.body = "Take a moment to reflect on your day."
+        content.sound = .default
+
+        let calendar = Calendar.current
+        var dateComponents = DateComponents()
+        dateComponents.hour = calendar.component(.hour, from: reminderTime)
+        dateComponents.minute = calendar.component(.minute, from: reminderTime)
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: dateComponents, repeats: true)
+        let request = UNNotificationRequest(identifier: Self.reminderIdentifier, content: content, trigger: trigger)
+        center.add(request)
+    }
+
+    private func cancelReminder() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.reminderIdentifier])
+    }
+
+    private static func loadReminderTime() -> Date {
+        let defaults = UserDefaults.standard
+        let hour = defaults.object(forKey: reminderHourKey) as? Int ?? 20
+        let minute = defaults.object(forKey: reminderMinuteKey) as? Int ?? 0
+        var components = DateComponents()
+        components.hour = hour
+        components.minute = minute
+        return Calendar.current.date(from: components) ?? Date()
     }
 }

@@ -14,14 +14,38 @@ struct SettingsView: View {
 
                 // Notifications
                 settingsSection("Notifications") {
-                    Toggle(isOn: $vm.notificationsEnabled) {
-                        Text("Daily reminder")
+                    VStack(spacing: 1) {
+                        Toggle(isOn: Binding(
+                            get: { vm.notificationsEnabled },
+                            set: { newValue in Task { await vm.setNotificationsEnabled(newValue) } }
+                        )) {
+                            Text("Daily reminder")
+                                .font(AppTheme.Fonts.labelSans)
+                                .foregroundStyle(AppTheme.Colors.textPrimary)
+                        }
+                        .tint(AppTheme.Colors.accent)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 16)
+
+                        if vm.notificationsEnabled {
+                            Divider()
+                                .background(AppTheme.Colors.divider)
+                                .padding(.horizontal, 20)
+
+                            DatePicker(
+                                "Remind me at",
+                                selection: Binding(
+                                    get: { vm.reminderTime },
+                                    set: { vm.updateReminderTime($0) }
+                                ),
+                                displayedComponents: .hourAndMinute
+                            )
                             .font(AppTheme.Fonts.labelSans)
                             .foregroundStyle(AppTheme.Colors.textPrimary)
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 16)
+                        }
                     }
-                    .tint(AppTheme.Colors.accent)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 16)
                     .background(AppTheme.Colors.surface)
                     .clipShape(RoundedRectangle(cornerRadius: AppTheme.Layout.cornerRadius))
                 }
@@ -90,6 +114,16 @@ struct SettingsView: View {
             Button("OK", role: .cancel) {}
         } message: {
             Text(vm.errorMessage ?? "")
+        }
+        .alert("Notifications are off", isPresented: $vm.showPermissionDeniedAlert) {
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Enable notifications for Daily Reflection in Settings to turn on your daily reminder.")
         }
     }
 

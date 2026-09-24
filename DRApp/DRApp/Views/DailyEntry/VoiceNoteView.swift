@@ -30,8 +30,32 @@ struct VoiceNoteView: View {
                 recordingRow
             case .recorded, .playing:
                 playbackRow
+            case .permissionDenied:
+                permissionDeniedRow
             }
         }
+    }
+
+    // MARK: - Permission denied
+
+    private var permissionDeniedRow: some View {
+        HStack(spacing: 14) {
+            micCircle(isActive: false)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Microphone access is off")
+                    .font(AppTheme.Fonts.labelSans)
+                    .foregroundStyle(AppTheme.Colors.textPrimary)
+                Button("Open Settings") {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                }
+                .font(AppTheme.Fonts.captionSans)
+                .foregroundStyle(AppTheme.Colors.accent)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Idle: hold-to-record button
@@ -56,6 +80,12 @@ struct VoiceNoteView: View {
                 .foregroundStyle(AppTheme.Colors.textSecondary)
         }
         .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Record voice note")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            Task { await service.requestPermissionAndStart() }
+        }
     }
 
     // MARK: - Recording row
@@ -94,6 +124,12 @@ struct VoiceNoteView: View {
         .padding(.vertical, 14)
         .background(AppTheme.Colors.surface)
         .clipShape(RoundedRectangle(cornerRadius: AppTheme.Layout.cornerRadius))
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Recording, \(service.formattedDuration)")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            service.stopRecording()
+        }
     }
 
     // MARK: - Playback row (swipe-to-delete)
@@ -116,6 +152,7 @@ struct VoiceNoteView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.red)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Layout.cornerRadius))
+            .accessibilityHidden(true)
 
             // Playback content — slides over the red background
             HStack(spacing: 12) {
@@ -138,6 +175,7 @@ struct VoiceNoteView: View {
                     }
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(service.state == .playing ? "Pause" : "Play")
 
                 // Progress track
                 GeometryReader { geo in
@@ -165,7 +203,7 @@ struct VoiceNoteView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 14)
-            .background(.white)
+            .background(AppTheme.Colors.surface)
             .clipShape(RoundedRectangle(cornerRadius: AppTheme.Layout.cornerRadius))
             .offset(x: swipeOffset)
             .gesture(
@@ -180,7 +218,8 @@ struct VoiceNoteView: View {
                     .onEnded { value in
                         if value.translation.width < -60 {
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                swipeOffset = -UIScreen.main.bounds.width
+                                // Off-screen in either direction; exact distance doesn't matter.
+                                swipeOffset = -1000
                             }
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
                                 service.deleteRecording()
@@ -193,6 +232,9 @@ struct VoiceNoteView: View {
                         }
                     }
             )
+            .accessibilityAction(named: "Delete") {
+                service.deleteRecording()
+            }
         }
         .fixedSize(horizontal: false, vertical: true)
     }
@@ -216,6 +258,7 @@ struct VoiceNoteView: View {
 private struct RecordingWaveformView: View {
 
     @State private var heights: [CGFloat] = [0.4, 0.7, 0.5, 0.9, 0.4, 0.6, 0.3]
+    @State private var timer: Timer?
 
     private let columns = 7
     private let barWidth: CGFloat = 3
@@ -234,14 +277,17 @@ private struct RecordingWaveformView: View {
             }
         }
         .frame(height: maxBarHeight)
-        .onAppear { animate() }
+        .onAppear { startAnimating() }
+        .onDisappear {
+            timer?.invalidate()
+            timer = nil
+        }
     }
 
-    private func animate() {
+    private func startAnimating() {
         // Re-randomise bar heights every 130 ms to simulate a live waveform.
-        Timer.scheduledTimer(withTimeInterval: 0.13, repeats: true) { t in
+        timer = Timer.scheduledTimer(withTimeInterval: 0.13, repeats: true) { _ in
             heights = (0 ..< columns).map { _ in CGFloat.random(in: 0.15 ... 1.0) }
-            // Stop once the view is gone (service state check is in parent)
         }
     }
 }

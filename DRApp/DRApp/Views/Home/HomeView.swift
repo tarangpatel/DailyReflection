@@ -15,15 +15,20 @@ struct HomeView: View {
         }
     }
 
-    private var lastWeekReflection: WeeklyReflection? {
-        reflections.first
-    }
-
     private var lastWeekStart: Date {
         let calendar = Calendar.current
         let today = calendar.startOfDay(for: Date())
         // Previous ISO week start
-        return calendar.date(byAdding: .weekOfYear, value: -1, to: isoWeekStart(for: today))!
+        return calendar.date(byAdding: .weekOfYear, value: -1, to: isoWeekStart(for: today)) ?? today
+    }
+
+    /// Only surfaces a reflection when it actually belongs to last week —
+    /// otherwise a month-old reflection would silently read as current.
+    private var lastWeekReflection: WeeklyReflection? {
+        let calendar = Calendar.current
+        return reflections.first {
+            calendar.isDate($0.weekStartDate, inSameDayAs: lastWeekStart)
+        }
     }
 
     var body: some View {
@@ -114,10 +119,12 @@ struct HomeView: View {
                         Image(systemName: "calendar")
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
+                    .accessibilityLabel("History")
                     NavigationLink(value: AppDestination.settings) {
                         Image(systemName: "gearshape")
                             .foregroundStyle(AppTheme.Colors.textSecondary)
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
         }
